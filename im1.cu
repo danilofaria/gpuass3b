@@ -31,8 +31,12 @@ static void gpuCheckError( cudaError_t err,
 
  __global__ void gaussianBlur (unsigned int w, unsigned int h, float * G, float *imageArray, float *blurredImageArray, int colorNumber)
 {
-    int x = blockDim.x * blockIdx.x + threadIdx.x;
-    int y = blockDim.y * blockIdx.y + threadIdx.y;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+
+    int x = blockDim.x * blockIdx.x + tx;
+    int y = blockDim.y * blockIdx.y + ty;
+
     // do nothing if we are not in the useable space of
     // threads (see kernel launch call: you may be creating
     // more threads than you need)
@@ -43,46 +47,44 @@ static void gpuCheckError( cudaError_t err,
 
     float weight = 0.f;
     float color=0.f, g_ij;
-    int g_idx;
-    int idx2;
-    int i,j;
+    int i,j, idx2;
 
     __shared__ float s_data [BLOCK_SIZE_Y + RADIUS*2][BLOCK_SIZE_X + RADIUS*2]; 
 
-    s_data[RADIUS + threadIdx.y][RADIUS + threadIdx.x] = imageArray[idx];
+    s_data[RADIUS + ty][RADIUS + tx] = imageArray[idx];
 
-    if(threadIdx.x < RADIUS){
-        idx2 = ((y * w) + max(0,x - 2*threadIdx.x - 1)) + stride;
-        s_data[RADIUS + threadIdx.y][RADIUS - threadIdx.x - 1] = imageArray[idx2];
+    if(tx < RADIUS){
+        idx2 = ((y * w) + max(0,x - 2*tx - 1)) + stride;
+        s_data[RADIUS + ty][RADIUS - tx - 1] = imageArray[idx2];
     }
-    if(threadIdx.y < RADIUS){
-        idx2 = (((max(0, y - 2*threadIdx.y - 1))* w) + x) + stride;
-        s_data[RADIUS - threadIdx.y - 1][RADIUS + threadIdx.x] = imageArray[idx2];
+    if(ty < RADIUS){
+        idx2 = (((max(0, y - 2*ty - 1))* w) + x) + stride;
+        s_data[RADIUS - ty - 1][RADIUS + tx] = imageArray[idx2];
     }
-    if(threadIdx.x >= BLOCK_SIZE_X - RADIUS){
+    if(tx >= BLOCK_SIZE_X - RADIUS){
         idx2 = ((y * w) + min(w-1, x + RADIUS)) + stride;
-        s_data[RADIUS + threadIdx.y][threadIdx.x + 2*RADIUS] = imageArray[idx2];
+        s_data[RADIUS + ty][tx + 2*RADIUS] = imageArray[idx2];
     }
-    if(threadIdx.y >= BLOCK_SIZE_Y - RADIUS){
+    if(ty >= BLOCK_SIZE_Y - RADIUS){
         idx2 = ((min(h - 1, y + RADIUS)* w) + x) + stride;
-        s_data[threadIdx.y + 2*RADIUS][RADIUS + threadIdx.x] = imageArray[idx2];
+        s_data[ty + 2*RADIUS][RADIUS + tx] = imageArray[idx2];
     }
 
-    if(threadIdx.x < RADIUS && threadIdx.y < RADIUS){
-        idx2 = (((max(0, y - 2*threadIdx.y - 1)) * w) + max(0,x - 2*threadIdx.x - 1)) + stride;
-        s_data[RADIUS - threadIdx.y - 1][RADIUS - threadIdx.x - 1] = imageArray[idx2];
+    if(tx < RADIUS && ty < RADIUS){
+        idx2 = (((max(0, y - 2*ty - 1)) * w) + max(0,x - 2*tx - 1)) + stride;
+        s_data[RADIUS - ty - 1][RADIUS - tx - 1] = imageArray[idx2];
     }
-    if(threadIdx.x >= BLOCK_SIZE_X - RADIUS && threadIdx.y >= BLOCK_SIZE_Y - RADIUS){
+    if(tx >= BLOCK_SIZE_X - RADIUS && ty >= BLOCK_SIZE_Y - RADIUS){
         idx2 = ((min(h - 1, y + RADIUS) * w) + min(w-1, x + RADIUS)) + stride;
-        s_data[threadIdx.y + 2*RADIUS][threadIdx.x + 2*RADIUS] = imageArray[idx2];
+        s_data[ty + 2*RADIUS][tx + 2*RADIUS] = imageArray[idx2];
     }
-    if(threadIdx.x < RADIUS && threadIdx.y >= BLOCK_SIZE_Y - RADIUS){
-        idx2 = ((min(h - 1, y + RADIUS) * w) + max(0,x - 2*threadIdx.x - 1)) + stride;
-        s_data[threadIdx.y + 2*RADIUS][RADIUS - threadIdx.x - 1] = imageArray[idx2];
+    if(tx < RADIUS && ty >= BLOCK_SIZE_Y - RADIUS){
+        idx2 = ((min(h - 1, y + RADIUS) * w) + max(0,x - 2*tx - 1)) + stride;
+        s_data[ty + 2*RADIUS][RADIUS - tx - 1] = imageArray[idx2];
     }
-    if(threadIdx.y < RADIUS && threadIdx.x >= BLOCK_SIZE_X - RADIUS){
-        idx2 = (((max(0, y - 2*threadIdx.y - 1)) * w) + min(w-1, x + RADIUS)) + stride;
-        s_data[RADIUS - threadIdx.y - 1][threadIdx.x + 2*RADIUS] = imageArray[idx2];
+    if(ty < RADIUS && tx >= BLOCK_SIZE_X - RADIUS){
+        idx2 = (((max(0, y - 2*ty - 1)) * w) + min(w-1, x + RADIUS)) + stride;
+        s_data[RADIUS - ty - 1][tx + 2*RADIUS] = imageArray[idx2];
     }
 
     __syncthreads();
@@ -90,14 +92,11 @@ static void gpuCheckError( cudaError_t err,
     for(i = max(0, y - RADIUS); i <= min(h - 1, y + RADIUS); i++){
         for(j = max(0, x - RADIUS); j <= min(w-1, x + RADIUS); j++){
 
-            g_idx = (i-y+RADIUS)*(2*RADIUS+1) + (j-x+RADIUS);
-            g_ij = G[g_idx];
+            g_ij = G[(i-y+RADIUS)*(2*RADIUS+1) + (j-x+RADIUS)];
 
             weight += g_ij;
 
-            idx2 = ((i * w) + j) + stride;
-
-            color += s_data[RADIUS + threadIdx.y + i-y][RADIUS + threadIdx.x+ j-x] * g_ij;
+            color += s_data[RADIUS + ty + i-y][RADIUS + tx+ j-x] * g_ij;
         }
     }
 
